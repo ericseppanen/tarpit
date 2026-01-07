@@ -147,19 +147,6 @@ impl TarpitFs {
         (ino, FileType::Directory, dir_name(num))
     }
 
-    fn inode_to_dir(&self, ino: u64) -> Option<DirInode> {
-        match Inode::from_ino_u64(ino) {
-            Inode::File(_) => None,
-            Inode::Dir(dir_inode) => {
-                if dir_inode.num() > self.num_dirs + 1 {
-                    None
-                } else {
-                    Some(dir_inode)
-                }
-            }
-        }
-    }
-
     fn inode_attr(&self, inode: Inode) -> Option<FileAttr> {
         match inode {
             Inode::Dir(dir_inode) => {
