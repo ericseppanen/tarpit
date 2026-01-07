@@ -14,9 +14,12 @@ struct Args {
     #[arg(long)]
     allow_root: bool,
     mount_point: PathBuf,
-    /// Number of directories,
+    /// Number of directories
     #[arg(long, default_value_t = 1000)]
     dirs: u64,
+    /// Number of files per directory
+    #[arg(long, default_value_t = 1000)]
+    files_per_dir: u64,
 }
 
 fn main() {
@@ -31,7 +34,10 @@ fn main() {
         options.push(MountOption::AllowRoot);
     }
 
-    let fs = TarpitFs::builder().dirs(args.dirs).build();
+    let fs = TarpitFs::builder()
+        .dirs(args.dirs)
+        .files(args.files_per_dir)
+        .build();
 
     fuser::mount2(fs, &args.mount_point, &options).unwrap();
 }
