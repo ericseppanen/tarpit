@@ -52,8 +52,6 @@ fn file_attr(ino: u64) -> FileAttr {
     }
 }
 
-const NUM_DIRS: u64 = 1000;
-
 fn dir_name(num: u64) -> String {
     format!("pit{num:03}")
 }
@@ -61,41 +59,77 @@ fn dir_name(num: u64) -> String {
 /// Directories are offset by a constant so they are kept separate from files
 const DIR_INODE_OFFSET: u64 = 0x10000;
 
-fn dir_name_to_inode(name: &str) -> Option<u64> {
-    let num: u64 = name.strip_prefix("pit")?.parse().ok()?;
-    dir_num_to_inode(num)
+pub struct TarpitBuilder {
+    num_dirs: u64,
 }
 
-fn dir_num_to_inode(num: u64) -> Option<u64> {
-    if num < NUM_DIRS {
-        Some(num + DIR_INODE_OFFSET)
-    } else {
-        None
+impl Default for TarpitBuilder {
+    fn default() -> Self {
+        Self { num_dirs: 10 }
     }
 }
 
-/// returns (inode, type, name)
-fn dir_num_to_dirent(num: u64) -> (u64, FileType, String) {
-    let ino = dir_num_to_inode(num).unwrap();
-    (ino, FileType::Directory, dir_name(num))
+impl TarpitBuilder {
+    pub fn dirs(mut self, num_dirs: u64) -> Self {
+        assert!(num_dirs < DIR_INODE_OFFSET);
+        self.num_dirs = num_dirs;
+        self
+    }
+
+    pub fn build(self) -> TarpitFs {
+        TarpitFs {
+            num_dirs: self.num_dirs,
+        }
+    }
 }
 
-fn inode_to_dir_num(ino: u64) -> Option<u64> {
-    let num = ino.checked_sub(DIR_INODE_OFFSET)?;
-    if num < NUM_DIRS { Some(num) } else { None }
+pub struct TarpitFs {
+    num_dirs: u64,
 }
 
-fn _inode_to_dir_name(ino: u64) -> Option<String> {
-    let num = inode_to_dir_num(ino)?;
-    Some(dir_name(num))
-}
+impl TarpitFs {
+    pub fn builder() -> TarpitBuilder {
+        TarpitBuilder::default()
+    }
 
-fn inode_to_dir_attr(ino: u64) -> Option<FileAttr> {
-    let _num = inode_to_dir_num(ino)?;
-    Some(dir_attr(ino))
-}
+    fn dir_name_to_inode(&self, name: &str) -> Option<u64> {
+        let num: u64 = name.strip_prefix("pit")?.parse().ok()?;
+        self.dir_num_to_inode(num)
+    }
 
-pub struct TarpitFs;
+    fn dir_num_to_inode(&self, num: u64) -> Option<u64> {
+        if num <= self.num_dirs {
+            Some(num + DIR_INODE_OFFSET)
+        } else {
+            None
+        }
+    }
+
+    /// returns (inode, type, name)
+    fn dir_num_to_dirent(&self, num: u64) -> (u64, FileType, String) {
+        let ino = self.dir_num_to_inode(num).unwrap();
+        (ino, FileType::Directory, dir_name(num))
+    }
+
+    fn inode_to_dir_num(&self, ino: u64) -> Option<u64> {
+        let num = ino.checked_sub(DIR_INODE_OFFSET)?;
+        if num <= self.num_dirs {
+            Some(num)
+        } else {
+            None
+        }
+    }
+
+    fn _inode_to_dir_name(&self, ino: u64) -> Option<String> {
+        let num = self.inode_to_dir_num(ino)?;
+        Some(dir_name(num))
+    }
+
+    fn inode_to_dir_attr(&self, ino: u64) -> Option<FileAttr> {
+        let _num = self.inode_to_dir_num(ino)?;
+        Some(dir_attr(ino))
+    }
+}
 
 impl Filesystem for TarpitFs {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
@@ -110,14 +144,14 @@ impl Filesystem for TarpitFs {
 
         // Looking at a directory entry from the top dir.
         if parent == 1
-            && let Some(ino) = dir_name_to_inode(name)
+            && let Some(ino) = self.dir_name_to_inode(name)
         {
-            let attr = inode_to_dir_attr(ino).unwrap();
+            let attr = self.inode_to_dir_attr(ino).unwrap();
             return reply.entry(&TTL, &attr, 0);
         }
 
         // Looking at a file from a directory.
-        if let Some(_dir_num) = inode_to_dir_num(parent) {
+        if let Some(_dir_num) = self.inode_to_dir_num(parent) {
             if name == "hello.txt" {
                 return reply.entry(&TTL, &file_attr(2), 0);
             }
@@ -136,7 +170,7 @@ impl Filesystem for TarpitFs {
             return reply.attr(&TTL, &file_attr(ino));
         }
 
-        if let Some(attr) = inode_to_dir_attr(ino) {
+        if let Some(attr) = self.inode_to_dir_attr(ino) {
             return reply.attr(&TTL, &attr);
         }
 
@@ -169,15 +203,15 @@ impl Filesystem for TarpitFs {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        let mut entries = Vec::with_capacity(NUM_DIRS as usize + 2);
+        let mut entries = Vec::with_capacity(self.num_dirs as usize + 2);
         if ino == 1 {
             entries.extend([
                 (1, FileType::Directory, ".".to_string()),
                 (1, FileType::Directory, "..".to_string()),
             ]);
-            let subdirs = (1..NUM_DIRS).map(dir_num_to_dirent);
+            let subdirs = (1..self.num_dirs + 1).map(|sub| self.dir_num_to_dirent(sub));
             entries.extend(subdirs);
-        } else if let Some(_dir_num) = inode_to_dir_num(ino) {
+        } else if let Some(_dir_num) = self.inode_to_dir_num(ino) {
             entries.extend([
                 (ino, FileType::Directory, ".".to_string()),
                 (1, FileType::Directory, "..".to_string()),
