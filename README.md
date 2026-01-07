@@ -23,6 +23,23 @@ build the binary and run it. For example:
 Note that some IDEs may get unhappy if you mount a huge faux filesystem inside the
 project directory.
 
+Use `-h` to display the full set of parameters:
+```plaintext
+$ tarpit -h
+Usage: tarpit [OPTIONS] <MOUNT_POINT>
+
+Arguments:
+  <MOUNT_POINT>
+
+Options:
+      --auto-unmount
+      --allow-root
+      --dirs <DIRS>                    Number of directories [default: 1000]
+      --files-per-dir <FILES_PER_DIR>  Number of files per directory [default: 1000]
+      --slowdown-ms <SLOWDOWN_MS>      How much to slow down filesystem operations [default: 0]
+  -h, --help                           Print help
+```
+
 ### Verbose logging
 
 To see every request that hits the filesystem, use:
