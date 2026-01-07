@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
-const EPOCH: LazyLock<SystemTime> = LazyLock::new(|| UNIX_EPOCH + Duration::from_secs(1751364000));
+static EPOCH: LazyLock<SystemTime> = LazyLock::new(|| UNIX_EPOCH + Duration::from_secs(1751364000));
 
 fn dir_attr(ino: u64) -> FileAttr {
     FileAttr {
@@ -67,7 +67,7 @@ fn dir_name_to_inode(name: &str) -> Option<u64> {
 }
 
 fn dir_num_to_inode(num: u64) -> Option<u64> {
-    if num < NUM_DIRS as u64 {
+    if num < NUM_DIRS {
         Some(num + DIR_INODE_OFFSET)
     } else {
         None
@@ -99,6 +99,11 @@ pub struct TarpitFs;
 
 impl Filesystem for TarpitFs {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        #![allow(
+            clippy::collapsible_if,
+            reason = "right style for adding more functionality later"
+        )]
+
         let Some(name) = name.to_str() else {
             return reply.error(ENOENT);
         };
@@ -170,7 +175,7 @@ impl Filesystem for TarpitFs {
                 (1, FileType::Directory, ".".to_string()),
                 (1, FileType::Directory, "..".to_string()),
             ]);
-            let subdirs = (1..NUM_DIRS).into_iter().map(dir_num_to_dirent);
+            let subdirs = (1..NUM_DIRS).map(dir_num_to_dirent);
             entries.extend(subdirs);
         } else if let Some(_dir_num) = inode_to_dir_num(ino) {
             entries.extend([
