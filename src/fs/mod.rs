@@ -208,11 +208,9 @@ impl Filesystem for TarpitFs {
         match self.inode_attr(inode) {
             Some(attr) => {
                 self.slowdown();
-                return reply.attr(&TTL, &attr);
+                reply.attr(&TTL, &attr)
             }
-            None => {
-                return reply.error(ENOENT);
-            }
+            None => reply.error(ENOENT),
         }
     }
 
