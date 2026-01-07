@@ -2,6 +2,7 @@ use clap::Parser;
 use fuser::MountOption;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::fs::TarpitFs;
 
@@ -20,6 +21,9 @@ struct Args {
     /// Number of files per directory
     #[arg(long, default_value_t = 1000)]
     files_per_dir: u64,
+    /// How much to slow down filesystem operations
+    #[arg(long, default_value_t = 0)]
+    slowdown_ms: u64,
 }
 
 fn main() {
@@ -37,6 +41,7 @@ fn main() {
     let fs = TarpitFs::builder()
         .dirs(args.dirs)
         .files(args.files_per_dir)
+        .slowdown(Duration::from_millis(args.slowdown_ms))
         .build();
 
     fuser::mount2(fs, &args.mount_point, &options).unwrap();

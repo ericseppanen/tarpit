@@ -64,6 +64,7 @@ fn dir_name(num: u64) -> String {
 pub struct TarpitBuilder {
     num_dirs: u64,
     num_files: u64,
+    slowdown: Duration,
 }
 
 impl Default for TarpitBuilder {
@@ -71,6 +72,7 @@ impl Default for TarpitBuilder {
         Self {
             num_dirs: 10,
             num_files: 10,
+            slowdown: Duration::ZERO,
         }
     }
 }
@@ -94,10 +96,17 @@ impl TarpitBuilder {
         self
     }
 
+    /// Add a delay to every filesystem operation
+    pub(crate) fn slowdown(mut self, slowdown: Duration) -> Self {
+        self.slowdown = slowdown;
+        self
+    }
+
     pub fn build(self) -> TarpitFs {
         TarpitFs {
             num_dirs: self.num_dirs,
             num_files: self.num_files,
+            slowdown: self.slowdown,
         }
     }
 }
@@ -105,11 +114,17 @@ impl TarpitBuilder {
 pub struct TarpitFs {
     num_dirs: u64,
     num_files: u64,
+    slowdown: Duration,
 }
 
 impl TarpitFs {
     pub fn builder() -> TarpitBuilder {
         TarpitBuilder::default()
+    }
+
+    /// A deliberate slowdown, if configured.
+    fn slowdown(&self) {
+        std::thread::sleep(self.slowdown);
     }
 
     fn dir_name_to_inode(&self, name: &str) -> Option<DirInode> {
@@ -168,7 +183,7 @@ impl Filesystem for TarpitFs {
             return reply.error(ENOENT);
         };
 
-        log::info!("lookup {parent:0x} {name:?}");
+        self.slowdown();
 
         // Looking at a directory entry from the top dir.
         if parent == 1 {
@@ -178,7 +193,6 @@ impl Filesystem for TarpitFs {
                     return reply.entry(&TTL, &attr, 0);
                 }
                 None => {
-                    log::error!("no inode found in top dir");
                     return reply.error(ENOENT);
                 }
             }
@@ -206,6 +220,7 @@ impl Filesystem for TarpitFs {
         let inode = Inode::from_ino_u64(ino);
         match self.inode_attr(inode) {
             Some(attr) => {
+                self.slowdown();
                 return reply.attr(&TTL, &attr);
             }
             None => {
@@ -231,6 +246,7 @@ impl Filesystem for TarpitFs {
             }
             Inode::File(file_inode) => {
                 if file_inode.num() == 2 {
+                    self.slowdown();
                     reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
                 } else {
                     reply.error(ENOENT);
@@ -276,8 +292,7 @@ impl Filesystem for TarpitFs {
             return reply.error(ENOENT);
         };
 
-        // Deliberate slowdown
-        std::thread::sleep(Duration::from_millis(50));
+        self.slowdown();
 
         for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
             // i + 1 means the index of the next entry
