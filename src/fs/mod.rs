@@ -2,6 +2,7 @@ use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
 };
 use libc::{EISDIR, ENOENT, ENOTDIR};
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -57,8 +58,27 @@ fn file_attr(inode: FileInode) -> FileAttr {
     }
 }
 
-fn dir_name(num: u64) -> String {
-    format!("pit{num:03}")
+struct FsName(Cow<'static, str>);
+
+impl FsName {
+    fn from_static(s: &'static str) -> Self {
+        Self(s.into())
+    }
+
+    fn from_dir_num(num: u64) -> Self {
+        Self(format!("pit{num:03}").into())
+    }
+
+    fn from_file_num(num: u64) -> Self {
+        Self(format!("hello{num:03}.txt").into())
+    }
+}
+
+impl AsRef<OsStr> for FsName {
+    fn as_ref(&self) -> &OsStr {
+        let s: &str = self.0.as_ref();
+        s.as_ref()
+    }
 }
 
 pub struct TarpitBuilder {
@@ -141,10 +161,33 @@ impl TarpitFs {
         }
     }
 
+    fn file_name_to_inode(&self, parent: DirInode, name: &str) -> Option<FileInode> {
+        let num: u64 = name
+            .strip_prefix("hello")?
+            .strip_suffix(".txt")?
+            .parse()
+            .ok()?;
+        self.file_num_to_inode(parent, num)
+    }
+
+    fn file_num_to_inode(&self, parent: DirInode, num: u64) -> Option<FileInode> {
+        if num == 0 || num > self.num_files {
+            None
+        } else {
+            FileInode::from_number(parent, num)
+        }
+    }
+
     /// returns (inode, type, name)
-    fn dir_num_to_dirent(&self, num: u64) -> (DirInode, FileType, String) {
+    fn dir_num_to_dirent(&self, num: u64) -> (DirInode, FileType, FsName) {
         let ino = self.dir_num_to_inode(num).unwrap();
-        (ino, FileType::Directory, dir_name(num))
+        (ino, FileType::Directory, FsName::from_dir_num(num))
+    }
+
+    /// returns (inode, type, name)
+    fn file_num_to_dirent(&self, parent: DirInode, num: u64) -> (FileInode, FileType, FsName) {
+        let ino = self.file_num_to_inode(parent, num).unwrap();
+        (ino, FileType::RegularFile, FsName::from_file_num(num))
     }
 
     fn inode_attr(&self, inode: Inode) -> Option<FileAttr> {
@@ -195,9 +238,8 @@ impl Filesystem for TarpitFs {
             log::error!("parent directory num out of range");
             return reply.error(ENOENT);
         }
-        if name == "hello.txt" {
-            let file = FileInode::from_number(parent_inode, 2).unwrap();
-            return reply.entry(&TTL, &file_attr(file), 0);
+        if let Some(file_inode) = self.file_name_to_inode(parent_inode, name) {
+            return reply.entry(&TTL, &file_attr(file_inode), 0);
         }
 
         reply.error(ENOENT);
@@ -230,7 +272,7 @@ impl Filesystem for TarpitFs {
                 reply.error(EISDIR);
             }
             Inode::File(file_inode) => {
-                if file_inode.num() == 2 {
+                if file_inode.num() <= self.num_files {
                     self.slowdown();
                     reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
                 } else {
@@ -258,8 +300,8 @@ impl Filesystem for TarpitFs {
         if dir_num == 1 {
             entries.reserve(2 + self.num_dirs as usize);
             entries.extend([
-                (1, FileType::Directory, ".".to_string()),
-                (1, FileType::Directory, "..".to_string()),
+                (1, FileType::Directory, FsName::from_static(".")),
+                (1, FileType::Directory, FsName::from_static("..")),
             ]);
             let subdirs = (1..self.num_dirs + 1).map(|dir_num| {
                 let (dir, ty, name) = self.dir_num_to_dirent(dir_num);
@@ -267,12 +309,16 @@ impl Filesystem for TarpitFs {
             });
             entries.extend(subdirs);
         } else if dir_num <= self.num_dirs + 1 {
-            let file_ino: u64 = FileInode::from_number(dir_inode, 2).unwrap().into();
+            entries.reserve(2 + self.num_files as usize);
             entries.extend([
-                (ino, FileType::Directory, ".".to_string()),
-                (1, FileType::Directory, "..".to_string()),
-                (file_ino, FileType::RegularFile, "hello.txt".to_string()),
+                (ino, FileType::Directory, FsName::from_static(".")),
+                (1, FileType::Directory, FsName::from_static("..")),
             ]);
+            let files = (1..self.num_files + 1).map(|file_num| {
+                let (file, ty, name) = self.file_num_to_dirent(dir_inode, file_num);
+                (file.into(), ty, name)
+            });
+            entries.extend(files);
         } else {
             return reply.error(ENOENT);
         };
